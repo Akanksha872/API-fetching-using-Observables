@@ -1,6 +1,6 @@
-import { fromEvent } from 'rxjs';
+import { fromEvent, of } from 'rxjs';
 import { fromFetch } from 'rxjs/fetch';
-import { exhaustMap, mergeMap } from 'rxjs/operators';
+import { catchError, exhaustMap, mergeMap, retry, tap } from 'rxjs/operators';
 
 import { createElement } from './helper';
 
@@ -23,12 +23,34 @@ const addFact = ({ fact }) => {
 };
 const addFacts = (data) => data.facts.forEach(addFact);
 
-const endpoint = 'https://rxjs-api.glitch.me/api/facts?delay=2000&chaos=true';
+const endpoint =
+  'https://rxjs-api.glitch.me/api/facts?delay=2000&chaos=true&flakiness=2';
 
 const fetch$ = fromEvent(fetchButton, 'click').pipe(
-  mergeMap(() => {
-    return fromFetch(endpoint).pipe(mergeMap((response) => response.json()));
+  exhaustMap(() => {
+    return fromFetch(endpoint).pipe(
+      tap(clearError),
+      mergeMap((response) => {
+        if (response.ok) {
+          return response.json();
+        } else {
+          throw new Error('Oops!!!Something went wrong');
+        }
+      }),
+      retry(4),
+      catchError((error) => {
+        clearFacts();
+        return of({ error: error.message });
+      })
+    );
   })
 );
 
-fetch$.subscribe(addFacts);
+fetch$.subscribe(({ facts, error }) => {
+  if (error) {
+    return setError(error);
+  } else {
+    clearFacts();
+    addFacts({ facts });
+  }
+});
